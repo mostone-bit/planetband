@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>PLANET-GARDEN: HAPPY & COZY</title>
+    <style>
+        body {
+            margin: 0; background: #fffaf0; color: #554433;
+            font-family: 'Comic Sans MS', cursive, sans-serif; overflow: hidden;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh;
+        }
+        #game-container { position: relative; }
+        canvas { 
+            background: radial-gradient(circle, #ffe4b5 0%, #ffdab9 100%); 
+            display: block; border-radius: 50%;
+            box-shadow: 0 0 50px rgba(255, 165, 0, 0.3);
+        }
+        .ui {
+            position: absolute; top: 20px; width: 100%; pointer-events: none;
+            display: flex; justify-content: space-around; font-weight: bold;
+            text-shadow: 0 0 5px #fff; font-size: 1.2em;
+        }
+        .controls { margin-top: 20px; text-align: center; display: flex; gap: 10px; }
+        button {
+            padding: 15px 30px; font-size: 1.1em; background: #ff99aa; border: none;
+            border-radius: 50px; cursor: pointer; font-weight: bold; color: #fff;
+            transition: 0.3s; box-shadow: 0 5px 15px rgba(255, 153, 170, 0.4);
+        }
+        button:hover { transform: scale(1.05); background: #ff7788; }
+        #sellBtn { background: #ffd700; box-shadow: 0 5px 15px rgba(255, 215, 0, 0.4); color: #8b4513; }
+        .info-panel { color: #8b4513; margin-top: 10px; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+        <div class="ui">
+            <div>🌸 <span id="cargo">0</span></div>
+            <div>SALES: $<span id="money">0</span></div>
+            <div>BAND: <span id="inst">1</span>/11</div>
+            <div id="track-info">TRACK: 1/20</div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button id="startBtn">START / STOP MUSIC</button>
+        <button id="sellBtn">SELL (売却)</button>
+    </div>
+    <div class="info-panel">
+        ハッピーなメロディと一緒に、1000売るごとにバンドメンバーが増えます！
+    </div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const R = 280;
+canvas.width = canvas.height = 600;
+const CX = canvas.width / 2;
+const CY = canvas.height / 2;
+
+const WORLD_SIZE = 1600;
+let cargoCount = 0;
+let cargoValue = 0;
+let money = 0;
+let instrumentCount = 1;
+let level = 1;
+let frame = 0;
+const MAX_CARGO = 25;
+
+const player = { wx: 800, wy: 800, angle: 0, speed: 2.3, turnSpeed: 0.09, size: 10 };
+
+let plants = [];
+const TYPES = ['fruit', 'flower', 'bamboo'];
+
+function spawnPlant() {
+    let type = TYPES[Math.floor(Math.random() * TYPES.length)];
+    let rarity = "normal";
+    let val = 10;
+    let hue = 100 + Math.random() * 40;
+    let fruitHue = Math.random() * 360;
+    let sat = 100;
+
+    let roll = Math.random();
+    if (roll > 0.985) { rarity = "gold"; val = 250; fruitHue = 45; }
+    else if (roll > 0.93) { rarity = "silver"; val = 60; fruitHue = 0; sat = 0; }
+
+    plants.push({
+        wx: Math.random() * WORLD_SIZE,
+        wy: Math.random() * WORLD_SIZE,
+        growth: 0,
+        maxGrowth: 80 + Math.random() * 40,
+        type, rarity, val, hue, fruitHue, sat
+    });
+}
+for(let i=0; i<40; i++) spawnPlant();
+
+function project(wx, wy) {
+    let dx = wx - player.wx, dy = wy - player.wy;
+    if (dx > WORLD_SIZE/2) dx -= WORLD_SIZE; if (dx < -WORLD_SIZE/2) dx += WORLD_SIZE;
+    if (dy > WORLD_SIZE/2) dy -= WORLD_SIZE; if (dy < -WORLD_SIZE/2) dy += WORLD_SIZE;
+    const s = Math.sin(-player.angle - Math.PI/2), c = Math.cos(-player.angle - Math.PI/2);
+    const rx = dx * c - dy * s, ry = dx * s + dy * c;
+    const dist = Math.hypot(rx, ry), maxView = 500;
+    if (dist > maxView) return { visible: false };
+    const theta = (dist / maxView) * (Math.PI / 1.1), mag = Math.sin(theta) * R;
+    return { x: CX + Math.cos(Math.atan2(ry, rx)) * mag, y: CY + Math.sin(Math.atan2(ry, rx)) * mag, scale: Math.max(0, Math.cos(theta)), visible: Math.cos(theta) > 0 };
+}
+
+function update() {
+    plants.forEach(p => { if (p.growth < p.maxGrowth) p.growth += 0.05; });
+
+    let target = null;
+    if (cargoCount < MAX_CARGO) {
+        let minDist = 9999;
+        plants.forEach(p => {
+            if (p.growth >= p.maxGrowth) {
+                let dx = p.wx - player.wx, dy = p.wy - player.wy;
+                if (dx > WORLD_SIZE/2) dx -= WORLD_SIZE; if (dx < -WORLD_SIZE/2) dx += WORLD_SIZE;
+                if (dy > WORLD_SIZE/2) dy -= WORLD_SIZE; if (dy < -WORLD_SIZE/2) dy += WORLD_SIZE;
+                const d = Math.hypot(dx, dy);
+                if (d < minDist) { minDist = d; target = {dx, dy}; }
+            }
+        });
+    }
+
+    if (target) {
+        let diff = Math.atan2(target.dy, target.dx) - player.angle;
+        while (diff < -Math.PI) diff += Math.PI * 2; while (diff > Math.PI) diff -= Math.PI * 2;
+        player.angle += diff * player.turnSpeed;
+    }
+
+    player.wx += Math.cos(player.angle) * player.speed;
+    player.wy += Math.sin(player.angle) * player.speed;
+    if (player.wx < 0) player.wx += WORLD_SIZE; if (player.wx > WORLD_SIZE) player.wx -= WORLD_SIZE;
+    if (player.wy < 0) player.wy += WORLD_SIZE; if (player.wy > WORLD_SIZE) player.wy -= WORLD_SIZE;
+
+    if (cargoCount < MAX_CARGO) {
+        plants.forEach((p, idx) => {
+            if (p.growth >= p.maxGrowth) {
+                let dx = p.wx - player.wx, dy = p.wy - player.wy;
+                if (dx > WORLD_SIZE/2) dx -= WORLD_SIZE; if (dx < -WORLD_SIZE/2) dx += WORLD_SIZE;
+                if (dy > WORLD_SIZE/2) dy -= WORLD_SIZE; if (dy < -WORLD_SIZE/2) dy += WORLD_SIZE;
+                if (Math.hypot(dx, dy) < player.size + 12) {
+                    cargoCount++;
+                    cargoValue += p.val * level;
+                    plants.splice(idx, 1);
+                    document.getElementById('cargo').innerText = cargoCount;
+                    spawnPlant();
+                    playSe(600 + (p.val / 2), 'sine', 0.1);
+                }
+            }
+        });
+    }
+    draw();
+    updateAudio();
+    frame++;
+    requestAnimationFrame(update);
+}
+
+function drawPlant(ctx, p, size, scale) {
+    ctx.shadowBlur = (p.rarity === "normal" ? 5 : 20) * scale;
+    ctx.shadowColor = `hsla(${p.fruitHue}, ${p.sat}%, 70%, 1)`;
+    ctx.fillStyle = `hsla(${p.fruitHue}, ${p.sat}%, 70%, ${scale})`;
+
+    switch(p.type) {
+        case 'flower':
+            for(let i=0; i<6; i++) {
+                ctx.rotate(Math.PI/3);
+                ctx.beginPath(); ctx.ellipse(size, 0, size, size/2, 0, 0, Math.PI*2); ctx.fill();
+            }
+            ctx.fillStyle = "#fff";
+            ctx.beginPath(); ctx.arc(0, 0, size/2, 0, Math.PI*2); ctx.fill();
+            break;
+        case 'bamboo':
+            for(let i=0; i<3; i++) ctx.fillRect(-size, -i*size*1.2, size*2, size);
+            break;
+        case 'fruit':
+            if(p.rarity === "gold") {
+                for(let i=0; i<5; i++) { ctx.rotate(Math.PI*2/5); ctx.lineTo(0, -size*1.5); ctx.lineTo(size/2, 0); }
+                ctx.fill();
+            } else {
+                ctx.beginPath(); ctx.rect(-size, -size, size*2, size*2); ctx.fill();
+            }
+            break;
+    }
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = "rgba(255, 100, 150, 0.1)";
+    for (let gx = 0; gx < WORLD_SIZE; gx += 100) {
+        ctx.beginPath();
+        for (let gy = 0; gy < WORLD_SIZE; gy += 40) {
+            const p = project(gx, gy); if (p.visible) ctx.lineTo(p.x, p.y); else ctx.moveTo(p.x, p.y);
+        }
+        ctx.stroke();
+    }
+    plants.forEach(p => {
+        const proj = project(p.wx, p.wy); if (!proj.visible) return;
+        const size = (p.growth / p.maxGrowth) * 8 * proj.scale;
+        ctx.save(); ctx.translate(proj.x, proj.y);
+        if (p.growth < p.maxGrowth) {
+            ctx.fillStyle = `hsla(${p.hue}, 70%, 60%, ${proj.scale})`;
+            ctx.beginPath(); ctx.arc(0, 0, size/1.5, 0, Math.PI*2); ctx.fill();
+        } else { drawPlant(ctx, p, size, proj.scale); }
+        ctx.restore();
+    });
+    ctx.save(); ctx.translate(CX, CY - 20);
+    const cargoRatio = cargoCount / MAX_CARGO;
+    ctx.fillStyle = `hsla(45, 100%, 60%, 0.8)`;
+    ctx.shadowBlur = 15 * cargoRatio; ctx.shadowColor = "#ffcc00";
+    ctx.fillRect(-10, 10, 20, 4 + cargoRatio * 18);
+    ctx.fillStyle = cargoCount >= MAX_CARGO ? "#ff4444" : "#ff99aa";
+    ctx.shadowBlur = 15; ctx.shadowColor = ctx.fillStyle;
+    ctx.beginPath(); ctx.moveTo(0, -12); ctx.lineTo(-10, 8); ctx.lineTo(10, 8); ctx.closePath(); ctx.fill();
+    ctx.restore();
+}
+
+/** Audio Engine: Happy & Cozy **/
+let audioCtx = null, isPlaying = false, nextNoteTime = 0, step = 0;
+let currentTrack = 0;
+
+function playSe(f, type='sine', dur=0.2) {
+    if (!audioCtx) return;
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type; o.frequency.setValueAtTime(f, audioCtx.currentTime);
+    g.gain.setValueAtTime(0.06, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + dur);
+}
+
+function playNote(freq, vol, dur, type='triangle') {
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, nextNoteTime);
+    
+    g.gain.setValueAtTime(0, nextNoteTime);
+    g.gain.linearRampToValueAtTime(vol, nextNoteTime + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, nextNoteTime + dur);
+    
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(nextNoteTime); o.stop(nextNoteTime + dur);
+}
+
+function updateAudio() {
+    if (!isPlaying || !audioCtx) return;
+    while (nextNoteTime < audioCtx.currentTime + 0.1) {
+        // Happier beat
+        if (step % 8 === 0) playNote(110, 0.15, 0.2, 'sine');
+        else if (step % 8 === 4) playNote(165, 0.1, 0.2, 'sine');
+
+        const chordPatterns = [
+            [[261.6, 329.6, 392.0, 523.3], [349.2, 440.0, 523.3, 698.5], [392.0, 493.9, 587.3, 784.0], [293.7, 370.0, 440.0, 587.3]],
+            [[523.3, 659.3, 784.0, 1046.5], [440.0, 554.4, 659.3, 880.0], [392.0, 493.9, 587.3, 784.0], [329.6, 392.0, 493.9, 659.3]],
+            [[261.6, 329.6, 392.0, 440.0], [329.6, 392.0, 440.0, 493.9], [349.2, 440.0, 523.3, 587.3], [392.0, 493.9, 587.3, 659.3]]
+        ];
+
+        if ([0, 2, 4, 6, 8, 10, 12, 14].includes(step % 16)) {
+            const pattern = chordPatterns[currentTrack % 3];
+            const chord = pattern[Math.floor((step % 64) / 16) % 4];
+            for(let i=0; i < Math.min(instrumentCount, 11); i++) {
+                playNote(chord[i % 4] * (i > 4 ? 2 : 1), 0.03, 0.4);
+            }
+        }
+
+        if (step % 64 === 0) currentTrack++;
+        nextNoteTime += 0.22; step++;
+    }
+}
+
+document.getElementById('startBtn').onclick = () => {
+    if (!audioCtx) audioCtx = new AudioContext();
+    isPlaying = !isPlaying; if(isPlaying) nextNoteTime = audioCtx.currentTime;
+};
+
+document.getElementById('sellBtn').onclick = () => {
+    if (cargoCount === 0) return;
+    money += cargoValue;
+    // 1000で2つ増える。最大5000で1+5*2 = 11台
+    instrumentCount = 1 + Math.floor(Math.min(money, 5000) / 1000) * 2;
+    document.getElementById('inst').innerText = instrumentCount;
+    
+    playSe(880, 'sine', 0.4);
+    cargoCount = 0; cargoValue = 0;
+    document.getElementById('money').innerText = Math.floor(money);
+    document.getElementById('cargo').innerText = cargoCount;
+};
+
+update();
+</script>
+</body>
+</html>
